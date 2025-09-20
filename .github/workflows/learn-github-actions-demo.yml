@@ -113,6 +113,8 @@ jobs:
   show_results:
     needs: demo_job                   # 必须等 demo_job 完成
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 👈 必须加这一行！
     steps:
       - name: 📊 显示上一个 Job 的结果
         run: |

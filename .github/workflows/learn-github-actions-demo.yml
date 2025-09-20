@@ -28,6 +28,8 @@ env:
 jobs:
   demo_job:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 👈 必须加这一行！
     outputs:                          # 定义 Job 输出，供后续 Job 使用
       final_mode: ${{ steps.set_mode.outputs.mode_name }}
       build_number: ${{ steps.generate_number.outputs.num }}

@@ -1,0 +1,143 @@
+name: 🧠 学习 GitHub Actions 核心用法 Demo
+
+# ========== 1. 触发方式：手动 + 定时 + 带输入参数 ==========
+on:
+  workflow_dispatch:    # 允许手动在网页上点击运行
+    inputs:
+      mode:           # 输入参数：选择模式
+        description: '运行模式'
+        required: true
+        type: choice
+        default: 'fast'
+        options: ['fast', 'slow', 'debug']
+      enable_feature:
+        description: '是否启用某功能'
+        type: boolean
+        default: false
+      custom_suffix:
+        description: '自定义后缀'
+        type: string
+        default: ''
+
+# ========== 2. 全局环境变量 ==========
+env:
+  DEMO_VERSION: '1.0.0'
+  DEFAULT_SUFFIX: 'learn-actions'
+
+# ========== 3. 定义 Job ==========
+jobs:
+  demo_job:
+    runs-on: ubuntu-latest
+    outputs:                          # 定义 Job 输出，供后续 Job 使用
+      final_mode: ${{ steps.set_mode.outputs.mode_name }}
+      build_number: ${{ steps.generate_number.outputs.num }}
+
+    steps:
+
+      # --- 4. 最基础：运行 Shell 命令 ---
+      - name: ✅ 显示基本信息
+        run: |
+          echo "当前时间: $(date)"
+          echo "运行在: ${{ runner.os }}"
+          echo "输入参数 mode: ${{ github.event.inputs.mode }}"
+          echo "全局环境变量: ${{ env.DEMO_VERSION }}"
+
+      # --- 5. 条件判断 if ---
+      - name: 🚦 根据输入参数执行不同逻辑
+        if: ${{ github.event.inputs.mode == 'fast' }}
+        run: echo "🚀 快速模式：跳过耗时步骤"
+
+      - name: 🐢 慢速模式额外步骤
+        if: ${{ github.event.inputs.mode == 'slow' }}
+        run: |
+          echo "🐌 慢速模式：模拟耗时任务..."
+          sleep 5
+          echo "慢速任务完成"
+
+      # --- 6. 设置环境变量 & Job 输出 ---
+      - name: 🧩 动态设置变量
+        id: set_mode                    # 设置 step id，用于引用输出
+        run: |
+          MODE="${{ github.event.inputs.mode }}"
+          echo "当前模式: $MODE"
+
+          # 设置 Step 输出 (给当前 Job 的其他 Step 或后续 Job 用)
+          echo "mode_name=$MODE" >> $GITHUB_OUTPUT
+
+          # 设置环境变量 (当前 Job 内后续 Step 可用)
+          echo "CURRENT_MODE=$MODE" >> $GITHUB_ENV
+
+      # --- 7. 使用环境变量 & 表达式 ---
+      - name: 📝 使用动态变量
+        run: |
+          echo "从上一步获取的模式: ${{ steps.set_mode.outputs.mode_name }}"
+          echo "从环境变量获取的模式: ${{ env.CURRENT_MODE }}"
+
+      # --- 8. 数学运算 & 备用值 (||) ---
+      - name: 🔢 生成构建号
+        id: generate_number
+        run: |
+          # 模拟：如果获取失败，使用默认值 999
+          BUILD_NUM=$(expr 100 + $(date +%s) % 100 2>/dev/null || echo 999)
+          echo "构建号: $BUILD_NUM"
+          echo "num=$BUILD_NUM" >> $GITHUB_OUTPUT
+
+      # --- 9. 字符串格式化 & 默认值 fallback ---
+      - name: 🏷️ 生成最终名称
+        run: |
+          # 如果 custom_suffix 为空，则使用 DEFAULT_SUFFIX
+          SUFFIX="${{ github.event.inputs.custom_suffix || env.DEFAULT_SUFFIX }}"
+          FINAL_NAME="demo-${{ env.DEMO_VERSION }}-${SUFFIX}-${{ steps.generate_number.outputs.num }}"
+          echo "最终产物名称: $FINAL_NAME"
+
+          # 设置为环境变量，方便后续步骤使用
+          echo "ARTIFACT_NAME=$FINAL_NAME" >> $GITHUB_ENV
+
+      # --- 10. 创建目录 & 模拟生成文件 ---
+      - name: 📂 创建模拟产物
+        run: |
+          mkdir -p ./output
+          echo "Hello GitHub Actions!" > ./output/${{ env.ARTIFACT_NAME }}.txt
+          echo "模拟文件已创建: ./output/${{ env.ARTIFACT_NAME }}.txt"
+
+      # --- 11. 上传工件 (Artifacts) ---
+      - name: 📤 上传文件供下载
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ./output/
+
+  # ========== 12. 第二个 Job，依赖第一个 Job ==========
+  show_results:
+    needs: demo_job                   # 必须等 demo_job 完成
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📊 显示上一个 Job 的结果
+        run: |
+          echo "🎉 上一个 Job 传递的模式: ${{ needs.demo_job.outputs.final_mode }}"
+          echo "🎉 上一个 Job 生成的构建号: ${{ needs.demo_job.outputs.build_number }}"
+
+      # --- 13. 下载上一个 Job 上传的工件 ---
+      - name: 📥 下载产物
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ format('demo-{0}-learn-actions-{1}', env.DEMO_VERSION, needs.demo_job.outputs.build_number) }}
+          path: ./downloaded
+
+      - name: 🔍 查看下载的文件
+        run: |
+          ls -la ./downloaded/
+          cat ./downloaded/*.txt
+
+      # --- 14. 条件性创建 Release (仅当不是 debug 模式) ---
+      - name: 🚀 创建 Release (非 Debug 模式)
+        if: ${{ needs.demo_job.outputs.final_mode != 'debug' }}
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ env.DEMO_VERSION }}-${{ needs.demo_job.outputs.build_number }}
+          name: Release ${{ env.DEMO_VERSION }} (${{ needs.demo_job.outputs.final_mode }})
+          body: |
+            - 构建号: ${{ needs.demo_job.outputs.build_number }}
+            - 模式: ${{ needs.demo_job.outputs.final_mode }}
+            - 时间: ${{ github.event.created_at }}
+          draft: false
